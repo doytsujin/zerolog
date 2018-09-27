@@ -6,8 +6,11 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 var eventPool = &sync.Pool{
@@ -274,7 +277,26 @@ func (e *Event) AnErr(key string, err error) *Event {
 	case LogObjectMarshaler:
 		return e.Object(key, m)
 	case error:
-		return e.Str(key, m.Error())
+		if err, hasStackTrace := err.(interface {
+			StackTrace() errors.StackTrace
+		}); hasStackTrace {
+			stack := Arr()
+			for _, f := range err.StackTrace() {
+				pc := uintptr(f) - 1
+				fn := runtime.FuncForPC(pc)
+				if fn != nil {
+					file, line := fn.FileLine(pc)
+					funcName := fn.Name()
+					funcName = funcName[strings.LastIndex(funcName, "/")+1:]
+					fileLine := fmt.Sprintf("%v:%v", file, line)
+					stack.Str(fmt.Sprintf("%v %v()", fileLine, funcName))
+				} else {
+					stack.Str("unknown")
+				}
+			}
+			e.Array("stack", stack)
+		}
+		return e
 	case string:
 		return e.Str(key, m)
 	default:
